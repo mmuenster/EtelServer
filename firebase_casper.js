@@ -1,4 +1,5 @@
 require('firebase.js');
+var utils = require('utils');
 var fb = new Firebase("https://dazzling-torch-3393.firebaseio.com/AveroQueue");
 var fb_caseData = new Firebase("https://dazzling-torch-3393.firebaseio.com/CaseData");
 
@@ -20,54 +21,60 @@ var casper = require("casper").create({
 	else if (this.getTitle()=='Work List') {
 		this.echo ("You are already logged in");
 	}
+
 	this.waitForSelector("input[name='ctl00$caseLaunchButton']", function() {
-			this.evaluate(function() {
-				document.getElementById('ctl00_caseLaunchTextBox').value = "SP14-011799";
-			});
-			}, function onTimeout() {
-				this.echo("Timed Out!");
-			}, 15000);
+		this.echo("listening to Firebase");
+		listenToFirebase();
+	}, function onTimeout() {
+		this.echo("Timed Out!");
+	}, 15000);
 
 }).run();
 
-		listenToFirebase();  //Initial call to start the loop
 
 function listenToFirebase() {
   fb.once('value', function(dataSnapshot) {
-		console.log("Requesting at " + Date());
-		dataSnapshot.forEach(function(childSnapshot) {
+  		console.log("Requesting data at " + Date());
+
+		dataSnapshot.forEach(function(childSnapshot) { 
 			var oneData=childSnapshot.val();
 			var action=false;
 
-			if (oneData.action=="reassign") { action = reassignCase(oneData); }
+			if (oneData.action=="reassign") { action = reassignCase(oneData, childSnapshot); }
 					
-			if (oneData.action=="pdfSave") { action = pdfSaveCase(oneData); }
+			if (oneData.action=="pdfSave") { action = pdfSaveCase(oneData, childSnapshot); }
 
-			if (oneData.action=="signout") { action = signoutCase(oneData); }
+			if (oneData.action=="signout") { action = signoutCase(oneData, childSnapshot); }
 				
-			if (oneData.action=="cptDeletes") { action = cptDeletesCase(oneData); }
+			if (oneData.action=="cptDeletes") { action = cptDeletesCase(oneData, childSnapshot); }
 
-			if (oneData.action=="cptAdds") { action = cptAddsCase(oneData); }
+			if (oneData.action=="cptAdds") { action = cptAddsCase(oneData, childSnapshot); }
 
-			if (oneData.action=="readCase") { action = readCase(oneData); }
+			if (oneData.action=="readCase") { action = readCase(oneData, childSnapshot); }
 
-			if (oneData.action=="writeCase") { action = writeCase(oneData); }
-
-			if(action) { childSnapshot.ref().remove(); }
+			if (oneData.action=="writeCase") { action = writeCase(oneData, childSnapshot); }
 		});
+		if(casper.steps.length > 0) {
+			casper.run(function() {
+				casper.steps=[];
+				casper.step=0;
+				setTimeout( function() { listenToFirebase(); }, 20000);
+			});
+		} else {
+			setTimeout( function() { listenToFirebase(); }, 20000);
+		}
+	}, function (err) {
+		console.log("Got to the error function");
 	});
-
-	setTimeout(function() { listenToFirebase(); },20000);
 }
 
-function readCase(marker) {
-
-	casper.open("https://path.averodx.com", function() {
+function readCase(marker, fbQueueItem) {
+	console.log("Reading case " + marker.caseNumber);
+	casper.thenOpen("https://path.averodx.com", function() {
 			this.sendKeys("input#ctl00_caseLaunchTextBox", marker.caseNumber);
-			this.thenClick("input#ctl00_caseLaunchButton");
-			});
-
-			casper.waitForSelector("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName", function() {
+			this.click("input#ctl00_caseLaunchButton");
+			this.waitForSelector("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName", function() {
+				console.log("Got past the wait statement!");
 				var patient = {};
 				patient.caseNumber = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_CaseNum").html;
 				patient.name = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName").html;
@@ -108,7 +115,6 @@ function readCase(marker) {
 
 					diagnosisId = "ctl00_DefaultContent_ResultPanel_ctl01_ResultEntry" + coi[0] + "_" + coi[0];
 					microscopicDescriptionId = "ctl00_DefaultContent_ResultPanel_ctl02_ResultEntry" + coi[1] + "_" + coi[1];
-					this.echo(microscopicDescriptionId);
 					commentId = "ctl00_DefaultContent_ResultPanel_ctl03_ResultEntry" + coi[2] + "_" + coi[2];
 					
 					patient.diagnosisTextArea=this.evaluate(function(id) { return document.getElementById(id).value; }, diagnosisId);
@@ -157,17 +163,17 @@ function readCase(marker) {
 					patient.priorCases[j] = { "createdDate":k, "completedDate":l, "reportURL":m, "diagnosisText":n };
 
 					}
-				utils.dump(patient);
 				fb_caseData.child(patient.caseNumber).set(patient);
-			});
-	casper.run();
-	return true;
+				fbQueueItem.ref().remove();
+				console.log("Finished reading case " + marker.caseNumber + ". \n");
+			}, function onTimeout(error) { console.log("There was an error waiting for the selector."); } , 15000);
+	});
 }
 
-function writeCase(marker) {
-
+function writeCase(marker, fbQueueItem) {
 }
-function reassignCase(marker) {
+
+function reassignCase(marker, fbQueueItem) {
 	casper.thenOpen('https://path.averodx.com/Custom/Avero/Workflow/CaseStatus.aspx?CaseNo='+marker.caseNumber, function() {
 					console.log("Reassigning " + marker.caseNumber +" now...");
 					this.waitForSelector("a[id='ctl00_DefaultContent_assignCase2User_AssignedUser']", function() {
@@ -209,19 +215,16 @@ function reassignCase(marker) {
 								document.querySelector("select[name='ctl00$DefaultContent$assignCase2User$drpAssignedUser']").value = doctor;
 							}, docvalue);
 							this.click("input[id='ctl00_DefaultContent_assignCase2User_saveAssignedUser']");
-							this.waitForSelector("a[id='ctl00_DefaultContent_assignCase2User_AssignedUser']", function() {
+							this.waitForSelector("a[id='ctl00_DefaultContent_assignCase2User_AssignedUser']", function() {  	
+								fbQueueItem.ref().remove();
+								console.log("Reassigning " + marker.caseNumber +" completed! \n");
 								});
-							console.log("Reassigning " + marker.caseNumber +" completed! \n");
 						});
 					});
 				});
-
-	casper.run();
-
-	return true;
 }
 
-function pdfSaveCase(marker) {
+function pdfSaveCase(marker, fbQueueItem) {
 	casper.then(function() {
 		casper.echo("pdfSave " + marker.caseNumber + " Starting...");
 	});
@@ -245,17 +248,13 @@ function pdfSaveCase(marker) {
 			var now=Date.now();
 			newdata[now]={ "action":"pdfReview", "caseNumber":marker.caseNumber, "url":"https://path.averodx.com" + j, "nodeName":now };
 			fb.update(newdata);
-			casper.echo("pdfSave " + marker.caseNumber + " Completed!");
-			childSnapshot.ref().remove();
+			casper.echo("pdfSave " + marker.caseNumber + " Completed! \n");
+			fbQueueItem.ref().remove();
 		});
 	});
-
-	casper.run();
-
-	return true;
 }
 
-function signoutCase(marker){
+function signoutCase(marker, fbQueueItem){
 	casper.then( function() {
 		console.log("Signout of " + marker.caseNumber + " starting...");
 		});
@@ -275,6 +274,7 @@ function signoutCase(marker){
 					
 	casper.then( function() {
 		console.log("Signout completed! \n");
+		fbQueueItem.ref().remove();
 		var start = new Date().getTime();
 			for (var b = 0; b < 1e7; b++) {
 			if ((new Date().getTime() - start) > 3000){
@@ -282,12 +282,9 @@ function signoutCase(marker){
 			}
 		}
 	});
-	casper.run();
-
-	return true;
 }
 
-function cptDeletesCase(marker) {
+function cptDeletesCase(marker, fbQueueItem) {
 		casper.then(function() {console.log("cptDeletes " + marker.caseNumber + " Starting...");});
 
 		casper.thenOpen("https://path.averodx.com/Custom/Avero/Billing/ChargePreview.aspx?CaseNo=" + marker.caseNumber, function () {
@@ -313,12 +310,11 @@ function cptDeletesCase(marker) {
 
 		casper.then( function() {
 			console.log("cptEdits on " + marker.caseNumber + " deletion completed!\n");
+			fbQueueItem.ref().remove();
 		});
-		casper.run();
-		return true;
 }
 
-function cptAddsCase(marker) {
+function cptAddsCase(marker, fbQueueItem) {
 	casper.then( function() {
 		console.log("cptAdds " + marker.caseNumber + " Starting...");
 		codes=marker.cptCodes.split(" ").sort();
@@ -365,7 +361,7 @@ function cptAddsCase(marker) {
 		
 	casper.then( function() {
 		console.log("cptAdds completed! \n");
+		fbQueueItem.ref().remove();
 		});
-	casper.run();
-	return true;
 }
+
