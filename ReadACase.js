@@ -1,4 +1,8 @@
 var utils = require('utils');
+require('firebase.js');
+var fb = new Firebase("https://dazzling-torch-3393.firebaseio.com/AveroQueue");
+var fb_caseData = new Firebase("https://dazzling-torch-3393.firebaseio.com/CaseData");
+
 var casper = require('casper').create({
 	//pageSettings: { userAgent: 'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.2; Trident/6.0)'}
 	//verbose: true,
@@ -21,13 +25,13 @@ casper.start('https://path.averodx.com/', function() {
 });
 
 casper.then(function() {
-		this.sendKeys("input#ctl00_caseLaunchTextBox", "SP14-011799");
+		this.sendKeys("input#ctl00_caseLaunchTextBox", "SP14-014271");
 		this.thenClick("input#ctl00_caseLaunchButton");
 		});
 
-
 casper.waitForSelector("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName", function() {
 	var patient = {};
+	patient.caseNumber = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_CaseNum").html;
 	patient.name = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName").html;
 	patient.dob = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_DOB").html;
 	patient.age = this.getElementInfo("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_Age").html;
@@ -85,7 +89,38 @@ casper.waitForSelector("span#ctl00_DefaultContent_PatientHeader_PatientDemograph
 		var photoURL="https://path.averodx.com/" + photoSRC;
 
 		patient.photo = this.base64encode(photoURL);
+
+		patient.priorCaseCount= this.evaluate(function() {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows.length - 1;
+		});
+
+		patient.priorCases = {};
+		for(i=1; i <= patient.priorCaseCount; i++)	{
+
+		j = this.evaluate(function(index) {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows[index].cells[0].innerHTML;
+		}, i);
+		k = this.evaluate(function(index) {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows[index].cells[1].innerHTML;
+		}, i);
+		l = this.evaluate(function(index) {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows[index].cells[3].innerHTML;
+		}, i);
+		m = this.evaluate(function(index) {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows[index].cells[4].childNodes[1].href;
+		}, i);
+
+		m = m || "" //If m is null, set to empty string
+		
+		n = this.evaluate(function(index) {
+			return document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PriorConcurrentCasesTab_PatientHistory_PatientHistoryGridView").rows[index].cells[5].childNodes[1].innerHTML;
+		}, i);
+
+		patient.priorCases[j] = { "createdDate":k, "completedDate":l, "reportURL":m, "diagnosisText":n };
+
+		}
 	utils.dump(patient);
+	fb_caseData.child(patient.caseNumber).set(patient);
 });
 
 casper.run(function() { 
