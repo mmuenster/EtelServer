@@ -171,6 +171,26 @@ function readCase(marker, fbQueueItem) {
 }
 
 function writeCase(marker, fbQueueItem) {
+casper.then(function() {
+	fb_caseData.child(marker.caseNumber).once('value', function (dataSnapshot) {
+		casper.then(function() {
+			casper.echo("Beginning writeCase for " + marker.caseNumber);
+			fbQueueItem.ref().remove();
+		});
+		casper.thenOpen("https://path.averodx.com/Custom/Avero/Tech/Surgical/Input.aspx?CaseNo=" + marker.caseNumber, function() {
+			this.waitForSelector("span#ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_PatientName", function() {
+				console.log("I am in casper.waitForSelector");
+				writeDataToEtel(dataSnapshot);
+				console.log("writeCase for " + marker.caseNumber +" completed! \n");
+
+			}, function writeCaseTimeout() {
+				console.log("The writeCase waitForSelector statement timed out. \n");
+			}, 15000);
+		});
+	}, function (err) {
+		utils.dump(err + "\n There was an error retreiving the data.");
+	});
+});
 }
 
 function reassignCase(marker, fbQueueItem) {
@@ -365,3 +385,43 @@ function cptAddsCase(marker, fbQueueItem) {
 		});
 }
 
+function writeDataToEtel(dataSnapshot){
+		var caseData= dataSnapshot.val();
+		var pagehtml = casper.getHTML();
+		var coi = pagehtml.match(/\d+\$UpdateProfessionalPanel/g);
+		coi[0]=coi[0].slice(0,8);
+		coi[1]=coi[1].slice(0,8);
+		coi[2]=coi[2].slice(0,8);
+
+		caseData.diagnosisId = "ctl00_DefaultContent_ResultPanel_ctl01_ResultEntry" + coi[0] + "_" + coi[0];
+		caseData.microscopicDescriptionId = "ctl00_DefaultContent_ResultPanel_ctl02_ResultEntry" + coi[1] + "_" + coi[1];
+		caseData.commentId = "ctl00_DefaultContent_ResultPanel_ctl03_ResultEntry" + coi[2] + "_" + coi[2];
+		
+		casper.evaluate( function(ad) {
+			
+			for(var i=0; i < ad.jarCount; i++) {
+				//Get the letter of the jar to use as the key for the 'jars' collection
+				j = document.getElementById("ctl00_DefaultContent_ResultPanel_ctl00_ResultControlPanel").childNodes[1].rows[i].cells[0].firstChild.childNodes[1].rows[0].childNodes[1].childNodes[0].innerHTML.substring(0,1);
+				//Set the site from the collection
+				document.getElementById("ctl00_DefaultContent_ResultPanel_ctl00_ResultControlPanel").childNodes[1].rows[i].cells[0].firstChild.childNodes[1].rows[0].childNodes[2].childNodes[0].value = ad.jars[j].site;
+				//Set the gross description from the collection
+				document.getElementById("ctl00_DefaultContent_ResultPanel_ctl00_ResultControlPanel").childNodes[1].rows[i].cells[0].firstChild.childNodes[1].rows[0].childNodes[3].childNodes[0].childNodes[1].value = ad.jars[j].grossDescription;
+			}
+
+			document.getElementById(ad.diagnosisId).value = ad.diagnosisTextArea;
+			document.getElementById(ad.microscopicDescriptionId).value = ad.microscopicDescriptionTextArea;
+			document.getElementById(ad.commentId).value = ad.commentTextArea;
+			//Set the hold case text box
+			document.getElementById("ctl00_DefaultContent_PatientHeader_PatientDemographicsTab_PatientSummaryTab_HoldCaseTextbox").value = ad.holdCaseText;
+			//Check the show photo button
+			document.getElementById(document.querySelector("td.ajax__combobox_textboxcontainer").firstChild.id.slice(0,58)+"ShowImageCheckBox").checked = true;
+		}, caseData);
+		
+		var imageCaptionID = casper.evaluate(function(){
+			return document.querySelector("td.ajax__combobox_textboxcontainer").firstChild.id;
+		});
+		//Must use the SendKeys method as the page detects the typing for the change in the caption
+		//Set the caption
+		casper.sendKeys("input#"+imageCaptionID, caseData.photoCaption);
+		casper.click("input#ctl00_DefaultContent_TopToolbar_InputToolbarBuild");
+}
